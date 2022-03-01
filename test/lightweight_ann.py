@@ -126,7 +126,7 @@ def faiss_search(args, doc_embeddings, query_embeddings, query_ids, embed_size=7
         MRR, Recalls = compute_metrics_from_files(path_to_reference, file_name, args.MRR_cutoff, args.Recall_cutoff)
 
     if args.save_hardneg_to_json:
-        rel_dict = load_rel(args.rel_file)
+        rel_dict = load_rel(path_to_reference)
         neg_dict = {}
         for qid, neighbors in zip(query_ids, topk):
             neg = list(filter(lambda x: x not in rel_dict[qid], neighbors))

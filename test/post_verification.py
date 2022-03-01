@@ -35,8 +35,8 @@ def main():
     parser.add_argument("--topk", type=int, default=1000)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--candidate_from_ann", type=str, required=True)
-    parser.add_argument("--sparse_weight", type=float, required=True, default=0.3)
-    parser.add_argument("--output_embedding_size", type=int, required=True, default=768)
+    parser.add_argument("--sparse_weight", type=float, required=False, default=0.3)
+    parser.add_argument("--output_embedding_size", type=int, required=False, default=768)
     parser.add_argument("--root_output_dir", type=str, required=False, default='./data')
 
     parser.add_argument("--doc_file", type=str, required=False, default=None)
@@ -128,10 +128,7 @@ def main():
 
     if args.mode != 'train':
         path_to_reference = f'./data/{args.data_type}/preprocess/{args.mode}-qrel.tsv'
-        metrics = compute_metrics_from_files(path_to_reference, args.output_rank_file, args.MRR_cutoff, args.Recall_cutoff)
-        print(f'#####################{args.output_rank_file}: ')
-        for metric in sorted(metrics):
-            print('{}: {}'.format(metric, metrics[metric]))
+        MRR, Recalls = compute_metrics_from_files(path_to_reference, args.output_rank_file, args.MRR_cutoff, args.Recall_cutoff)
 
 if __name__ == "__main__":
     main()

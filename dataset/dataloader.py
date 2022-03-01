@@ -43,7 +43,7 @@ class DataloaderForSubGraphHard(IterableDataset):
         self.docs_list = list(range(len(self.doc_dataset)))
 
         if rank_file is not None:
-            logging.info(f'*** *********construct the bipartite graph based on: {rank_file}******************')
+            logging.info(f'************ construct the bipartite graph based on: {rank_file} ************')
             self.query2neg, self.neg2query = self.init_graph(rank_file, mink=args.mink, maxk=args.maxk,
                                                              n2_mink=args.n2_mink, n2_mak=args.n2_maxk)
         else:
@@ -55,7 +55,7 @@ class DataloaderForSubGraphHard(IterableDataset):
                 if k in self.query2neg:
                     query2pos[k]=v
             self.query2pos = query2pos
-            logging.info(f'*** *********please confirm the number of query in hardneg_path: {len(self.query2pos)}******************')
+            logging.info(f'************ please confirm the number of query in hardneg_json: {len(self.query2neg)} ************')
 
         assert args.per_query_neg_num > 0
         self.hard_num = args.per_query_neg_num
@@ -82,7 +82,7 @@ class DataloaderForSubGraphHard(IterableDataset):
 
     def init_graph(self, rank_file, mink=0, maxk=200, n2_mink=0, n2_mak=200):
         rankdict = json.load(open(rank_file))
-        print(f'loaded hardneg file:{rank_file}')
+        # print(f'loaded hardneg file:{rank_file}')
         query2neg = {}
         for k, v in rankdict.items():
             k = int(k)

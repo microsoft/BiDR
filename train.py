@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import sys
 import logging
 import os
@@ -15,7 +18,7 @@ from arguments import DataTrainingArguments, ModelArguments, MyTrainingArguments
 from utils.utils import setup_worker, setuplogging, create_optimizer_and_scheduler, init_config, dist_gather_tensor
 from dataset.dataloader import DataloaderForSubGraphHard
 from dataset.dataset import TextTokenIdsCache
-from model.model import RobertaDot
+from model.model import RobertaDotTrainModel
 
 logger = logging.Logger(__name__)
 
@@ -31,7 +34,7 @@ def train(local_rank, model_args, data_args, training_args):
                               local_rank)
 
         config = init_config(model_args, data_args, training_args)
-        model = RobertaDot.from_pretrained(
+        model = RobertaDotTrainModel.from_pretrained(
             model_args.model_name_or_path,
             from_tf=bool(".ckpt" in model_args.model_name_or_path),
             config=config
@@ -50,7 +53,7 @@ def train(local_rank, model_args, data_args, training_args):
         dataloader = DataloaderForSubGraphHard(
             args=training_args,
             rel_file=os.path.join(data_args.data_dir, "train-qrel.tsv"),
-            rank_file=data_args.hardneg_path,
+            rank_file=data_args.hardneg_json,
             queryids_cache=TextTokenIdsCache(data_dir=data_args.data_dir, prefix="train-query"),
             max_query_length=data_args.max_query_length,
             docids_cache=TextTokenIdsCache(data_dir=data_args.data_dir, prefix="passages"),
@@ -85,24 +88,25 @@ def train(local_rank, model_args, data_args, training_args):
                     quant_k = ddp_model.module.quant(k_vecs) if training_args.use_pq else None
                     n_vecs = ddp_model.module.body_emb(neg_doc_ids, neg_doc_attention_mask) if neg_doc_ids is not None else None
                     quant_n = ddp_model.module.quant(n_vecs) if training_args.use_pq else None
-
-                    if training_args.world_size>1:
-                            k_vecs = dist_gather_tensor(k_vecs, training_args.world_size, local_rank)
-                            n_vecs = dist_gather_tensor(n_vecs, training_args.world_size, local_rank)
-                            if training_args.use_pq:
-                                quant_k = dist_gather_tensor(quant_k, training_args.world_size, local_rank)
-                                quant_n = dist_gather_tensor(quant_n, training_args.world_size, local_rank)
                 else:
                     k_vecs = k_emb.detach()
                     n_vecs = n_emb.detach()
-                    quant_k = ddp_model.module.quant(k_vecs) if training_args.use_pq == 1 else None
-                    quant_n = ddp_model.module.quant(n_vecs) if training_args.use_pq == 1 else None
+                    quant_k = ddp_model.module.quant(k_vecs) if training_args.use_pq else None
+                    quant_n = ddp_model.module.quant(n_vecs) if training_args.use_pq else None
+
+                if training_args.world_size > 1:
+                    q_vecs = dist_gather_tensor(q_vecs, training_args.world_size, local_rank)
+                    k_vecs = dist_gather_tensor(k_vecs, training_args.world_size, local_rank)
+                    n_vecs = dist_gather_tensor(n_vecs, training_args.world_size, local_rank)
+                    if training_args.use_pq:
+                        quant_k = dist_gather_tensor(quant_k, training_args.world_size, local_rank)
+                        quant_n = dist_gather_tensor(quant_n, training_args.world_size, local_rank)
 
                 batch_loss, batch_match_loss, batch_match_quant_loss, batch_l2loss = ddp_model(q_vecs, k_vecs, n_vecs,
                                        rel_pair_mask=rel_pair_mask, hard_pair_mask=hard_pair_mask,
                                        loss_method=training_args.loss_method,
                                        temperature=training_args.temperature,
-                                       hard_k=quant_k, hard_n=quant_n, quant_weight=training_args.l2_weight)
+                                       hard_k=quant_k, hard_n=quant_n, quant_weight=training_args.quantloss_weight)
 
                 loss += batch_loss.item()
                 match_loss += batch_match_loss.item()
@@ -133,7 +137,7 @@ def train(local_rank, model_args, data_args, training_args):
 
                     if global_step % training_args.save_steps == 0 and local_rank == 0:
                         ckpt_path = os.path.join(data_args.save_model_path,
-                                                 f'{training_args.savename}/{global_step}/')
+                                                 f'{data_args.savename}/{global_step}/')
                         Path(ckpt_path).mkdir(parents=True, exist_ok=True)
                         torch.save(model.state_dict(), os.path.join(ckpt_path, 'pytorch_model.bin'))
                         config.to_json_file( os.path.join(ckpt_path, 'config.json'))
@@ -143,7 +147,7 @@ def train(local_rank, model_args, data_args, training_args):
             logging.info("train time:{}".format(time.time() - start_time))
             if local_rank == 0 and ep%1 == 0:
                 ckpt_path = os.path.join(data_args.save_model_path,
-                                         f'{training_args.savename}/{ep}/')
+                                         f'{data_args.savename}/{ep}/')
                 Path(ckpt_path).mkdir(parents=True, exist_ok=True)
                 torch.save(model.state_dict(), os.path.join(ckpt_path,'pytorch_model.bin'))
                 config.to_json_file(os.path.join(ckpt_path, 'config.json'))

@@ -1,4 +1,6 @@
-# coding=utf-8
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import argparse
 import logging
 import os
@@ -104,21 +106,24 @@ def doc_inference(model, args, embedding_size):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_type", choices=["passage", 'doc', 'ads'], type=str, required=True)
-    parser.add_argument("--max_query_length", type=int, default=32) #32
+    parser.add_argument("--data_type", choices=["passage", 'doc'], type=str, required=True)
+    parser.add_argument("--preprocess_dir", type=str, required=True)
+    parser.add_argument("--max_query_length", type=int, default=32)
     parser.add_argument("--max_doc_length", type=int, default=512)
     parser.add_argument("--eval_batch_size", type=int, default=256)
-    parser.add_argument("--mode", type=str, choices=["train", "dev", "test", "test2019","test2020"], required=True)
+    parser.add_argument("--mode", type=str, choices=["train", "dev", "test", "test2019","test2020"], default='dev')
     parser.add_argument("--ckpt_path", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True, default='evaluate/')
     parser.add_argument("--root_output_dir", type=str, required=False, default='./data')
-    parser.add_argument("--gpu_rank", type=str, required=False, default='0_1_2_3_4_5_6_7')
+    parser.add_argument("--gpu_rank", type=str, required=False, default=None)
 
     args = parser.parse_args()
-    gpus = ','.join(args.gpu_rank.split('_'))
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpus
+
+    if args.gpu_rank is not None:
+        gpus = ','.join(args.gpu_rank.split('_'))
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpus
     args.device = torch.device(
-        "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+        "cuda" if torch.cuda.is_available() else "cpu")
     args.n_gpu = torch.cuda.device_count()
 
     print(f'------------------------use dataset: {args.preprocess_dir}------------------------')

@@ -1,3 +1,8 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+import sys
+sys.path.append('./')
 import os
 import torch
 import faiss
@@ -5,14 +10,16 @@ import argparse
 import logging
 import numpy as np
 from tqdm import tqdm
+import json
+import time
+from utils.msmarco_eval import compute_metrics_from_files
+from dataset.dataset import load_rel
+
 logger = logging.Logger(__name__, level=logging.INFO)
 handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s-%(name)s-%(levelname)s- %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-
-import time
-from utils.msmarco_eval import compute_metrics_from_files
 
 def load_index(index_path, use_cuda, faiss_gpu_index, centroid_embeds=None, doc_embeddings=None):
     index = faiss.read_index(index_path)
@@ -43,6 +50,7 @@ def load_index(index_path, use_cuda, faiss_gpu_index, centroid_embeds=None, doc_
         index = faiss.index_cpu_to_gpu(res, faiss_gpu_index, index, co)
     return index
 
+
 def search(index, args, embedding, batch_size):
     import math
     batch_num = math.ceil(len(embedding) / batch_size)
@@ -68,9 +76,8 @@ def faiss_search(args, doc_embeddings, query_embeddings, query_ids, embed_size=7
         save_index_path = os.path.join(args.output_dir, f"PQ{args.subvector_num}x8.index")
 
     if args.init_index_path is not None:
-        ckpt = torch.load(os.path.join(args.model_dir, 'pytorch_model.bin'))
+        ckpt = torch.load(os.path.join(args.ckpt_path, 'pytorch_model.bin'))
         centroid_embeds = ckpt['codebook']
-        print(centroid_embeds.size())
         index = load_index(args.init_index_path, use_cuda=args.gpu_search, faiss_gpu_index=0,
                            centroid_embeds=centroid_embeds, doc_embeddings=doc_embeddings)
         # index = faiss.index_gpu_to_cpu(index)
@@ -107,44 +114,46 @@ def faiss_search(args, doc_embeddings, query_embeddings, query_ids, embed_size=7
     scores, topk = search(index, args, query_embeddings, batch_size=32)
     print('searching costs:', time.time() - stme, (time.time() - stme) / len(query_embeddings))
 
-    file_name = os.path.join(args.output_dir, f"{args.mode}.rank_{args.topk}_score_faiss_opq.tsv")
-    if args.index == 'pq':
-        file_name = os.path.join(args.output_dir, f"{args.mode}.rank_{args.topk}_score_faiss_pq.tsv")
-
+    file_name = os.path.join(args.output_dir, f"{args.mode}.rank_{args.topk}_score_faiss_{args.index}.tsv")
     with open(file_name, 'w') as outputfile:
         for qid, score, neighbors in zip(query_ids, scores, topk):
             for idx, pid in enumerate(neighbors):
                 outputfile.write(f"{qid}\t{pid}\t{idx + 1}\t{score[idx]}\n")
 
     path_to_reference = f'./data/{args.data_type}/preprocess/{args.mode}-qrel.tsv'
-    metrics = compute_metrics_from_files(path_to_reference, file_name)
-    print(f'#####################{file_name}: ')
-    for metric in sorted(metrics):
-        print('{}: {}'.format(metric, metrics[metric]))
+
+    if args.mode != 'train':
+        MRR, Recalls = compute_metrics_from_files(path_to_reference, file_name, args.MRR_cutoff, args.Recall_cutoff)
+
+    if args.save_hardneg_to_json:
+        rel_dict = load_rel(args.rel_file)
+        neg_dict = {}
+        for qid, neighbors in zip(query_ids, topk):
+            neg = list(filter(lambda x: x not in rel_dict[qid], neighbors))
+            neg_dict[qid] = neg
+        json.dump(neg_dict, open(os.path.join(args.output_dir, f"{args.mode}_hardneg.json"), 'w'))
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--preprocess_dir", type=str, required=True)
-    parser.add_argument("--model_dir", type=str, required=True)
+    parser.add_argument("--ckpt_path", type=str, required=True)
     parser.add_argument("--data_type", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--subvector_num", type=int, required=True)
-    parser.add_argument("--max_doc_length", type=int, default=512)
-    parser.add_argument("--eval_batch_size", type=int, default=128)
-    parser.add_argument("--gpu_search", type=bool, default=False)
-    parser.add_argument("--gpu_index", type=int, default=0)
+    parser.add_argument("--gpu_search", action='store_true')
     parser.add_argument("--index", type=str, default='opq')
     parser.add_argument("--topk", type=int, default=1000)
     parser.add_argument("--mode", type=str, default='dev')
+    parser.add_argument("--save_hardneg_to_json", action='store_true')
 
     parser.add_argument("--doc_file", type=str, default=None)
     parser.add_argument("--query_file", type=str, default=None)
     parser.add_argument("--init_index_path", type=str, default=None)
 
+    parser.add_argument("--MRR_cutoff", type=int, default=10)
+    parser.add_argument("--Recall_cutoff", type=int, nargs='+', default=[5, 10, 30, 50, 100])
+
     args = parser.parse_args()
-    args.device = torch.device("cuda")
-    args.n_gpu = torch.cuda.device_count()
     logger.info(args)
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -166,8 +175,7 @@ def main():
     query_embeddings = np.memmap(args.query_embed_path,
                                  dtype=np.float32, mode="r")
     query_embeddings = query_embeddings.reshape(-1, 768)
-    query_ids = np.memmap(args.query_embed_path,
-                          dtype=np.int32, mode="r")
+    query_ids = list(range(len(query_embeddings)))
 
     faiss_search(args, doc_embeddings, query_embeddings, query_ids, embed_size=768)
 

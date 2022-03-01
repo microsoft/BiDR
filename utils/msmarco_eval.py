@@ -1,20 +1,7 @@
-"""
-This is official eval script opensourced on MSMarco site (not written or owned by us)
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
 
-This module computes evaluation metrics for MSMARCO dataset on the ranking task.
-Command line:
-python msmarco_eval_ranking.py <path_to_reference_file> <path_to_candidate_file>
-
-Creation Date : 06/12/2018
-Last Modified : 1/21/2019
-Authors : Daniel Campos <dacamp@microsoft.com>, Rutger van Haasteren <ruvanh@microsoft.com>
-"""
-"""
-I (Jingtao Zhan) modified this script for evaluating MSMARCO Doc dataset. --- 4/19/2021
-"""
 import sys
-import statistics
-
 from collections import Counter
 import numpy as np
 import json
@@ -133,7 +120,7 @@ def dcg_score(y_true):
 
 
 
-def compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages, path_to_candidate=None):
+def compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages, MRR_cutoff, Recall_cutoff):
     """Compute MRR metric
     Args:    
     p_qids_to_relevant_passageids (dict): dictionary of query-passage mapping
@@ -142,119 +129,39 @@ def compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passag
     Returns:
         dict: dictionary of metrics {'MRR': <MRR Score>}
     """
-    all_scores = {}
-    MRR = 0
-    MRR_100 = 0
-    NDCG, Recall = 0, 0
-    Recall1, Recall5, Recall20, Recall50, Recall1000, Recall5000,  Recall10000, Recall20000, Recall3000, Recall50000, Recall30 = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    Recall10 = 0
-    Recall200, Recall300, Recall500 = 0.0, 0.0, 0.0
-    qids_with_relevant_passages = 0
+    MRR = 0.0
+    Recall = [0.0]*len(Recall_cutoff)
     ranking = []
-
-    fout = None
-    if path_to_candidate is not None:
-        fout = open(path_to_candidate+'_details_scores', 'w')
-
     for qid in qids_to_ranked_candidate_passages:
-        temp_score = {}
         if qid in qids_to_relevant_passageids:
 
             ranking.append(0)
             target_pid = qids_to_relevant_passageids[qid]
             candidate_pid = qids_to_ranked_candidate_passages[qid]
 
-            # assert len(target_pid) == 1
-            actual_y = [0] * MaxMRRRank
-            # m = 0
-            temp_score['MRR10'] = 0.0
-            temp_score['MRR100'] = 0.0
-            for i in range(0, 10):
+            for i in range(0, MRR_cutoff):
                 if candidate_pid[i] in target_pid:
-                    actual_y[i] = 1
                     MRR += 1/(i + 1)
-                    temp_score['MRR10'] = 1/(i+1)
                     ranking.pop()
                     ranking.append(i+1)
                     break
 
-            for i in range(0,100):
-                if candidate_pid[i] in target_pid:
-                    MRR_100 += 1/(i + 1)
-                    temp_score['MRR100'] = 1/(i+1)
-                    # ranking.pop()
-                    # ranking.append(i+1)
-                    break
-
-            temp_score['R10'] = (len(set.intersection(set(target_pid), set(candidate_pid[:10])))/len(set(target_pid)))
-            temp_score['R50'] = (len(set.intersection(set(target_pid), set(candidate_pid[:50])))/len(set(target_pid)))
-            temp_score['R100'] = (len(set.intersection(set(target_pid), set(candidate_pid[:100])))/len(set(target_pid)))
-            temp_score['R1000'] = (len(set.intersection(set(target_pid), set(candidate_pid[:1000])))/len(set(target_pid)))
-            if fout:
-                fout.write(json.dumps(temp_score)+'\n')
-
-            # print(len(set.intersection(set(target_pid), set(candidate_pid[:MaxMRRRank]))))
-            Recall1 += (len(set.intersection(set(target_pid), set(candidate_pid[:1])))/len(set(target_pid)))
-            Recall5 += (len(set.intersection(set(target_pid), set(candidate_pid[:5])))/len(set(target_pid)))
-            Recall20 += (len(set.intersection(set(target_pid), set(candidate_pid[:20])))/len(set(target_pid)))
-            Recall30 += (len(set.intersection(set(target_pid), set(candidate_pid[:30])))/len(set(target_pid)))
-            Recall50 += (len(set.intersection(set(target_pid), set(candidate_pid[:50])))/len(set(target_pid)))
-            Recall10 += (len(set.intersection(set(target_pid), set(candidate_pid[:10])))/len(set(target_pid)))
-            Recall200 += (len(set.intersection(set(target_pid), set(candidate_pid[:200])))/len(set(target_pid)))
-            Recall300 += (len(set.intersection(set(target_pid), set(candidate_pid[:300])))/len(set(target_pid)))
-            Recall500 += (len(set.intersection(set(target_pid), set(candidate_pid[:500])))/len(set(target_pid)))
-            Recall1000 += (len(set.intersection(set(target_pid), set(candidate_pid[:1000]))) / len(set(target_pid)))
-
-            Recall += (len(set.intersection(set(target_pid), set(candidate_pid[:100])))/len(set(target_pid)))
-            if len(candidate_pid)>=10000:
-                Recall5000 += (len(set.intersection(set(target_pid), set(candidate_pid[:5000])))/len(set(target_pid)))
-                Recall10000 += (len(set.intersection(set(target_pid), set(candidate_pid[:10000])))/len(set(target_pid)))
-                # Recall20000 += (len(set.intersection(set(target_pid), set(candidate_pid[:20000])))/len(set(target_pid)))
-                Recall3000 += (len(set.intersection(set(target_pid), set(candidate_pid[:3000])))/len(set(target_pid)))
-                # Recall50000 += (len(set.intersection(set(target_pid), set(candidate_pid[:50000])))/len(set(target_pid)))
-
-            best_y = [0]*(MaxMRRRank)
-            best_y[0] = 1
-            # for i in range(len(set.intersection(set(target_pid), set(candidate_pid)))):
-            #     if i<MaxMRRRank:
-            #         best_y[i] = 1
-            best = dcg_score(np.array(best_y))
-            actual = dcg_score(np.array(actual_y))
-            NDCG += (actual/best)
-
-
+            for i, k in enumerate(Recall_cutoff):
+                Recall[i] += (len(set.intersection(set(target_pid), set(candidate_pid[:k])))/len(set(target_pid)))
 
     if len(ranking) == 0:
         raise IOError("No matching QIDs found. Are you sure you are scoring the evaluation set?")
     
     MRR = MRR/len(qids_to_relevant_passageids)
-    MRR_100 = MRR_100/len(qids_to_relevant_passageids)
-    Recall = Recall/len(qids_to_relevant_passageids)
-    NDCG = NDCG/len(qids_to_relevant_passageids)
-    all_scores[f'MRR @{MaxMRRRank}'] = MRR
-    all_scores[f'MRR @100'] = MRR_100
-    # all_scores[f'NDCG @{MaxMRRRank}'] = NDCG
-    all_scores[f'Recall @10'] = Recall10/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @50'] = Recall50/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @100'] = Recall
-    all_scores[f'Recall @200'] = Recall200/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @300'] = Recall300/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @500'] = Recall500/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @1'] = Recall1/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @5'] = Recall5/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @20'] = Recall20/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @30'] = Recall30/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @1000'] = Recall1000/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @10000'] = Recall10000/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @20000'] = Recall20000/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @3000'] = Recall3000/len(qids_to_relevant_passageids)
-    # all_scores[f'Recall @50000'] = Recall50000/len(qids_to_relevant_passageids)
-    all_scores[f'Recall @5000'] = Recall5000/len(qids_to_relevant_passageids)
+    Recall = [x/len(qids_to_relevant_passageids) for x in Recall]
 
-    all_scores['QueriesRanked'] = len(qids_to_ranked_candidate_passages)
-    return all_scores
+    print(f'MRR@{MRR_cutoff}:{MRR}')
+    for i, k in enumerate(Recall_cutoff):
+        print(f'Recall@{k}:{Recall[i]}')
+
+    return MRR, Recall
                 
-def compute_metrics_from_files(path_to_reference, path_to_candidate, perform_checks=True, output_details=False):
+def compute_metrics_from_files(path_to_reference, path_to_candidate, MRR_cutoff, Recall_cutoff, perform_checks=True):
     """Compute MRR metric
     Args:    
     p_path_to_reference_file (str): path to reference file.
@@ -277,10 +184,7 @@ def compute_metrics_from_files(path_to_reference, path_to_candidate, perform_che
         allowed, message = quality_checks_qids(qids_to_relevant_passageids, qids_to_ranked_candidate_passages)
         if message != '': print(message)
 
-    if output_details:
-        return compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages, path_to_candidate)
-
-    return compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages, None)
+    return compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages, MRR_cutoff, Recall_cutoff)
 
 def main():
     """Command line:

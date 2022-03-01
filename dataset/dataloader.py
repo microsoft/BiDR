@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import os
 import json
 import logging
@@ -39,9 +42,12 @@ class DataloaderForSubGraphHard(IterableDataset):
         self.doc_dataset = SequenceDataset(docids_cache, max_doc_length)
         self.docs_list = list(range(len(self.doc_dataset)))
 
-        self.query2neg, self.neg2query = self.init_graph(rank_file, mink=args.mink, maxk=args.maxk,
-                                                         n2_mink=args.n2_mink, n2_mak=args.n2_maxk,
-                                                         query_set=set(list(self.query2pos.keys())))
+        if rank_file is not None:
+            logging.info(f'*** *********construct the bipartite graph based on: {rank_file}******************')
+            self.query2neg, self.neg2query = self.init_graph(rank_file, mink=args.mink, maxk=args.maxk,
+                                                             n2_mink=args.n2_mink, n2_mak=args.n2_maxk)
+        else:
+            self.query2neg = self.random_negative_sample(self.query2pos.keys())
 
         if len(self.query2pos) > len(self.query2neg):
             query2pos = {}
@@ -51,8 +57,8 @@ class DataloaderForSubGraphHard(IterableDataset):
             self.query2pos = query2pos
             logging.info(f'*** *********please confirm the number of query in hardneg_path: {len(self.query2pos)}******************')
 
-        assert args.per_query_hard_num > 0
-        self.hard_num = args.per_query_hard_num
+        assert args.per_query_neg_num > 0
+        self.hard_num = args.per_query_neg_num
         self.query_length = query_length
         self.doc_length = doc_length
 
@@ -67,7 +73,14 @@ class DataloaderForSubGraphHard(IterableDataset):
         if args.fix_doc_emb:
             self.init_doc_embedding(infer_path, infer_path)
 
-    def init_graph(self, rank_file, mink=0, maxk=200, n2_mink=0, n2_mak=200, query_set=None):
+    def random_negative_sample(self, queries):
+        query2neg = {}
+        for q in queries:
+            neg = random.sample(self.docs_list, 100)
+            query2neg[q] = set(neg)
+        return query2neg
+
+    def init_graph(self, rank_file, mink=0, maxk=200, n2_mink=0, n2_mak=200):
         rankdict = json.load(open(rank_file))
         print(f'loaded hardneg file:{rank_file}')
         query2neg = {}
@@ -173,7 +186,7 @@ class DataloaderForSubGraphHard(IterableDataset):
     def generate_batch(self):
         if self.args.generate_batch_method == 'random':
             return self.random_batch()
-        elif self.args.generate_batch_method in ('dfs_subgraph', 'bfs_subgraph'):
+        elif self.args.generate_batch_method in ('random_walk', 'snow_sample'):
             return self.subgraph_batch()
         else:
             raise NotImplementedError(f'{self.args.generate_batch_method}')
@@ -221,9 +234,9 @@ class DataloaderForSubGraphHard(IterableDataset):
             qid = random.sample(self.query_set, 1)[0]
             self.node_queue.append(qid)
 
-        if search_method == 'dfs_subgraph':
+        if search_method == 'random_walk':
             return self.node_queue.pop()
-        elif search_method in ('bfs_subgraph'):
+        elif search_method in ('snow_sample'):
             return self.node_queue.pop(0)
         else:
             raise NotImplementedError

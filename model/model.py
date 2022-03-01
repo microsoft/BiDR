@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import torch
 from torch import nn
 import transformers
@@ -37,7 +40,7 @@ class BaseModelDot(nn.Module):
     def body_emb(self, input_ids, attention_mask):
         return self.query_emb(input_ids, attention_mask)
 
-    def forward(self, input_ids, attention_mask, is_query, multi_chunk=False, *args):
+    def forward(self, input_ids, attention_mask, is_query, *args):
         assert len(args) == 0
         if is_query:
             return self.query_emb(input_ids, attention_mask)
@@ -76,7 +79,7 @@ class ContrasPQ(nn.Module):
             self.partition = partition
             self.codebook = nn.Parameter(
                 torch.empty(partition, centroids,
-                            embedding_size // partition).uniform_(-1, 1)).type(
+                            embedding_size // partition).uniform_(-0.1, 0.1)).type(
                 torch.FloatTensor)
             self.rotate = None
 
@@ -128,14 +131,12 @@ class RobertaDot(BaseModelDot, RobertaPreTrainedModel, ContrasPQ):
             self.output_embedding_size = config.output_embedding_size
         else:
             self.output_embedding_size = config.hidden_size
-        print("output_embedding_size", self.output_embedding_size)
 
         if config.use_linear:
             self.embeddingHead = nn.Linear(config.hidden_size, self.output_embedding_size)
             self.norm = nn.LayerNorm(self.output_embedding_size)
         else:
             self.embeddingHead = None
-        print("use_linear", config.use_linear)
 
         self.apply(self._init_weights)
 
@@ -146,8 +147,10 @@ class RobertaDot(BaseModelDot, RobertaPreTrainedModel, ContrasPQ):
     def _text_encode(self, input_ids, attention_mask):
         outputs = self.roberta(input_ids=input_ids,
                                 attention_mask=attention_mask)
-        return outputs
+        return outputs[0]
 
+
+class RobertaDotTrainModel(RobertaDot):
     def forward(self, all_q, all_k, all_n,
                 rel_pair_mask=None, hard_pair_mask=None,
                 loss_method='multi_ce',
@@ -178,7 +181,7 @@ class RobertaDot(BaseModelDot, RobertaPreTrainedModel, ContrasPQ):
             score = torch.cat([score, n_score], dim=-1) #B B+BN
 
             if hard_k is not None:
-                rotate_q = self.rotate_vec(all_q, is_query=True)
+                rotate_q = self.rotate_vec(all_q)
                 quant_score = torch.matmul(rotate_q, hard_k.T)
                 quant_nscore = torch.matmul(rotate_q, hard_n.T)
                 quant_score = torch.cat([quant_score, quant_nscore], dim=-1)

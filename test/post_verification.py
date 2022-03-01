@@ -1,9 +1,14 @@
-# coding=utf-8
-import argparse
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import sys
+sys.path.append('./')
+import argparse
 import logging
 import os
 import numpy as np
+from utils.msmarco_eval import compute_metrics_from_files
+
 logger = logging.Logger(__name__)
 
 def load_q_k_score(file, topk=10000):
@@ -26,40 +31,31 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_type", choices=["passage", 'doc', 'trec_doc', 'quora'], type=str, required=True)
     parser.add_argument("--mode", type=str,
-                        choices=["train", "dev", "test", "lead", "dev1", "dev2", "test2019", "test2020"], required=True)
-    parser.add_argument("--topk", type=int, default=10000)
-    parser.add_argument("--ckpt", type=str, required=True)
-    parser.add_argument("--output_dir", type=str, required=True, default='evaluate/star')
-    parser.add_argument("--q_k_score_file", type=str, required=True, default='evaluate/star')
-    parser.add_argument("--ensemble_weigth", type=float, required=True, default=1.0)
-    parser.add_argument("--ori_weight", type=float, required=True, default=1.0)
-    parser.add_argument("--rerank_num", type=int, required=True, default=200)
+                        choices=["train", "dev", "test", "lead", "test2019", "test2020"], default='dev')
+    parser.add_argument("--topk", type=int, default=1000)
+    parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--candidate_from_ann", type=str, required=True)
+    parser.add_argument("--sparse_weight", type=float, required=True, default=0.3)
     parser.add_argument("--output_embedding_size", type=int, required=True, default=768)
-
     parser.add_argument("--root_output_dir", type=str, required=False, default='./data')
-    parser.add_argument("--gpu_rank", type=str, required=False, default='0_1_2_3_4_5_6_7')
-    parser.add_argument("--output_score", type=int, required=True, default=0)
 
     parser.add_argument("--doc_file", type=str, required=False, default=None)
     parser.add_argument("--query_file", type=str, required=False, default=None)
 
+    parser.add_argument("--MRR_cutoff", type=int, default=10)
+    parser.add_argument("--Recall_cutoff", type=int, nargs='+', default=[5, 10, 30, 50, 100])
 
     args = parser.parse_args()
-
-    gpus = ','.join(args.gpu_rank.split('_'))
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpus
-
     args.output_dir = os.path.join(f"{args.root_output_dir}/{args.data_type}/", args.output_dir)
+    args.output_score_file = os.path.join(args.output_dir, f"{args.mode}.dense_score.tsv")
+    args.output_rank_file = os.path.join(args.output_dir, f"{args.mode}.post_verifiaction.tsv")
+
     if args.query_file is None:
         args.query_memmap_path = os.path.join(args.output_dir, f"{args.mode}-query.memmap")
         args.queryids_memmap_path = os.path.join(args.output_dir, f"{args.mode}-query-id.memmap")
     else:
         args.query_memmap_path = os.path.join(args.query_file, f"{args.mode}-query.memmap")
         args.queryids_memmap_path = os.path.join(args.query_file, f"{args.mode}-query-id.memmap")
-
-
-
-    args.output_rank_file = os.path.join(args.output_dir, f"{args.mode}.rank_{args.topk}_rerank_score.tsv")
 
     if args.doc_file is None:
         args.doc_memmap_path = os.path.join(args.output_dir, "passages.memmap")
@@ -81,11 +77,7 @@ def main():
     query_ids = np.memmap(args.queryids_memmap_path,
                           dtype=np.int32, mode="r")
 
-    print('topk', args.topk)
-    if args.q_k_quant_score_file is not None:
-        q_k_score = load_q_k_score(args.q_k_quant_score_file, args.topk)
-    else:
-        q_k_score = load_q_k_score(args.q_k_score_file, args.topk)
+    q_k_score = load_q_k_score(args.candidate_from_ann, args.topk)
 
     docid2inx = {}
     for i, id in enumerate(doc_ids):
@@ -94,11 +86,8 @@ def main():
     for i, id in enumerate(query_ids):
         qid2inx[id] = i
 
-
-    print(args.output_rank_file)
-    # if not os.path.exists(args.output_rank_file):
     print('predicing----------------------')
-    with open(args.output_rank_file, 'w') as f:
+    with open(args.output_score_file, 'w') as f:
         count = 0
         for q in q_k_score.keys():
             ks, scores = q_k_score[q]
@@ -115,54 +104,34 @@ def main():
         if count % 500 == 0:
             print(f'---{count}---')
 
-    rerank_q_k_score = load_q_k_score(args.output_rank_file)
+    rerank_q_k_score = load_q_k_score(args.output_score_file)
     final_q_k_score = dict()
     for q in q_k_score.keys():
         ks1, scores1 = q_k_score[q]
         ks2, scores2 = rerank_q_k_score[q]
         temp_s = []
-        # print(ks1[:10], ks2[:10])
         for i, (s1, s2) in enumerate(zip(scores1,scores2)):
             assert ks1[i] == ks2[i]
-            if 'hnsw' in args.q_k_quant_score_file:
-                # print(s1, 1-s1)
-                s =  args.ensemble_weigth * s2 + args.ori_weight * (1-s1)
-            else:
-                s =  args.ensemble_weigth * s2 + args.ori_weight * (s1)
+            s = s2 + args.sparse_weight * s1
             temp_s.append(s)
         final_q_k_score[q] = (ks1, temp_s)
 
 
-    rerank_nums = [100, 200, 300, 500, 1000, 3000, 5000, 8000, 10000]
-    if '50000' in args.q_k_score_file:
-        rerank_nums = [100, 1000, 5000, 10000, 20000, 30000, 50000]
-    if args.topk==1000:
-        rerank_nums = [100, 300, 500, 1000]
-
-
-    outputfile = []
-    for file_idx, rerank_num in enumerate(rerank_nums):
-        outputfile.append(open(args.output_rank_file + f'_{rerank_num}', 'w', encoding='utf-8'))
-        print(args.output_rank_file + f'_{rerank_num}')
-
-
+    outputfile = open(args.output_rank_file, 'w', encoding='utf-8')
     for q in final_q_k_score.keys():
         ks, final_score = final_q_k_score[q]
-        for file_idx, rerank_num in enumerate(rerank_nums):
-            temp_final_score = final_score[:rerank_num]
-            temp_ks = ks[:rerank_num]
+        sorted_inx = np.argsort(final_score)[::-1]
+        sorted_ks = np.array(ks)[sorted_inx]
 
-            sorted_inx = np.argsort(temp_final_score)[::-1]
-            sorted_ks = np.array(temp_ks)[sorted_inx]
+        for idx, k in enumerate(sorted_ks):
+            outputfile.write(f"{q}\t{k}\t{idx + 1}\t{final_score[idx]}\n")
 
-            for idx, k in enumerate(sorted_ks):
-                if args.output_score == 1:
-                    outputfile[file_idx].write(f"{q}\t{k}\t{idx + 1}\t{final_score[idx]}\n")
-                else:
-                    outputfile[file_idx].write(f"{q}\t{k}\t{idx + 1}\n")
-
-
-
+    if args.mode != 'train':
+        path_to_reference = f'./data/{args.data_type}/preprocess/{args.mode}-qrel.tsv'
+        metrics = compute_metrics_from_files(path_to_reference, args.output_rank_file, args.MRR_cutoff, args.Recall_cutoff)
+        print(f'#####################{args.output_rank_file}: ')
+        for metric in sorted(metrics):
+            print('{}: {}'.format(metric, metrics[metric]))
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import torch.distributed as dist
 import torch
 import logging
@@ -5,7 +8,7 @@ import sys
 import numpy as np
 import random
 from transformers import AdamW, get_linear_schedule_with_warmup, RobertaConfig
-from lamb import Lamb
+from utils.lamb import Lamb
 
 def is_main_process(local_rank):
     return local_rank in [-1, 0]
@@ -101,11 +104,13 @@ def init_config(model_args, data_args, training_args):
         config.output_embedding_size = config.hidden_size
 
     config.use_linear = training_args.use_linear
-    config.fix_emb = training_args.fix_emb
+    config.fix_doc_emb = training_args.fix_doc_emb
     config.use_pq = training_args.use_pq
     config.partition = training_args.partition
     config.centroids = training_args.centroids
     config.init_index_path = training_args.init_index_path
 
     config.gradient_checkpointing = model_args.gradient_checkpointing
+
+    return config
 

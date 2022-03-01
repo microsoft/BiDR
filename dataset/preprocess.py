@@ -272,15 +272,7 @@ def preprocess(args):
             "msmarco-doctrain-qrels.tsv",
             "train-query",
             "train-qrel.tsv")
-        
-        write_query_rel(
-            args,
-            pid2offset,
-            "test-qid2offset.pickle",
-            "msmarco-test2019-queries.tsv",
-            "2019qrels-docs.txt",
-            "test-query",
-            "test-qrel.tsv")
+
         write_query_rel(
             args,
             pid2offset,
@@ -289,14 +281,6 @@ def preprocess(args):
             "msmarco-docdev-qrels.tsv",
             "dev-query",
             "dev-qrel.tsv")
-        write_query_rel(
-            args,
-            pid2offset,
-            "lead-qid2offset.pickle",
-            "docleaderboard-queries.tsv",
-            None,
-            "lead-query",
-            None)
 
     elif args.data_type == 1:
         write_query_rel(
@@ -317,23 +301,6 @@ def preprocess(args):
             "dev-query",
             "dev-qrel.tsv")
 
-        write_query_rel(
-            args,
-            pid2offset,
-            "test-qid2offset.pickle",
-            "msmarco-test2019-queries.tsv",
-            "2019qrels-pass.txt",
-            "test-query",
-            "test-qrel.tsv")
-
-        write_query_rel(
-            args,
-            pid2offset,
-            "test-qid2offset.pickle",
-            "msmarco-test2020-queries.tsv",
-            "2020qrels-pass.txt",
-            "test2020-query",
-            "test2020-qrel.tsv")
 
 def PassagePreprocessingFn(args, line, tokenizer):
     if args.data_type == 0:
@@ -429,14 +396,16 @@ def get_arguments():
 
 def main():
     args = get_arguments()
-    if args.data_type == 0:
-        args.data_dir = "./data/doc/dataset"
-        args.out_data_dir = "./data/doc/preprocess"
+    args.data_type = 0
+    args.data_dir = "./data/doc/dataset"
+    args.out_data_dir = "./data/doc/preprocess"
+    if not os.path.exists(args.out_data_dir):
+        os.makedirs(args.out_data_dir)
+    preprocess(args)
 
-    elif args.data_type == 1:
-        args.data_dir = "./data/passage/dataset"
-        args.out_data_dir = "./data/passage/preprocess"
-
+    args.data_type = 1
+    args.data_dir = "./data/passage/dataset"
+    args.out_data_dir = "./data/passage/preprocess"
     if not os.path.exists(args.out_data_dir):
         os.makedirs(args.out_data_dir)
     preprocess(args)

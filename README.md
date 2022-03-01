@@ -180,26 +180,6 @@ python train.py --model_name_or_path roberta-base \
 |tee ./log/${savename}.log
 ```
 
-```
-dataset=passage
-savename=dense_global_model
-python train.py --model_name_or_path roberta-base \
---max_query_length 24 --max_doc_length 128 \
---data_dir ./data/${dataset}/preprocess \
---learning_rate 1e-4 --optimizer_str adamw \
---per_device_train_batch_size 128 \
---per_query_neg_num 1 \
---generate_batch_method snow_sample \
---loss_method multi_ce  \
---savename ${savename} --save_model_path ./model \
---world_size 8 --gpu_rank 0_1_2_3_4_5_6_7  --master_port 13256 \
---num_train_epochs 30  \
---use_pq False \
---hardneg_json ./data/${data_type}/evaluate/sparse_global_model_20/train_hardneg.json \
---mink 0  --maxk 200 
-|tee ./log/${savename}.log
-```
-
 ### Test
 ```
 data_type=passage
